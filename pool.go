@@ -4,6 +4,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -53,6 +54,35 @@ func (p *Pool) Get() *ByteBuffer {
 	}
 }
 
+// GetFresh returns new byte buffer with zero length, created in period
+func (p *Pool) GetFresh(duration time.Duration) *ByteBuffer {
+	for {
+		result := p.GetWTime()
+
+		if time.Since(result.Created) < duration {
+			return result.ByteBuffer
+		}
+	}
+
+}
+
+// Get returns new byte buffer with zero length.
+//
+// The byte buffer may be returned to the pool via Put after the use
+// in order to minimize GC overhead.
+func (p *Pool) GetWTime() *ByteBufferWithTimestamp {
+	v := p.pool.Get()
+	if v != nil {
+		return v.(*ByteBufferWithTimestamp)
+	}
+	return &ByteBufferWithTimestamp{
+		ByteBuffer: &ByteBuffer{
+			B: make([]byte, 0, atomic.LoadUint64(&p.defaultSize)),
+		},
+		Created: time.Now(),
+	}
+}
+
 // Put returns byte buffer to the pool.
 //
 // ByteBuffer.B mustn't be touched after returning it to the pool.
@@ -63,6 +93,23 @@ func Put(b *ByteBuffer) { defaultPool.Put(b) }
 //
 // The buffer mustn't be accessed after returning to the pool.
 func (p *Pool) Put(b *ByteBuffer) {
+	idx := index(len(b.B))
+
+	if atomic.AddUint64(&p.calls[idx], 1) > calibrateCallsThreshold {
+		p.calibrate()
+	}
+
+	maxSize := int(atomic.LoadUint64(&p.maxSize))
+	if maxSize == 0 || cap(b.B) <= maxSize {
+		b.Reset()
+		p.pool.Put(b)
+	}
+}
+
+// Put releases byte buffer obtained via Get to the pool.
+//
+// The buffer mustn't be accessed after returning to the pool.
+func (p *Pool) PutWTime(b *ByteBufferWithTimestamp) {
 	idx := index(len(b.B))
 
 	if atomic.AddUint64(&p.calls[idx], 1) > calibrateCallsThreshold {

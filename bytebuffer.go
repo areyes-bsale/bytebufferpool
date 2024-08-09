@@ -1,6 +1,9 @@
 package bytebufferpool
 
-import "io"
+import (
+	"io"
+	"time"
+)
 
 // ByteBuffer provides byte buffer, which can be used for minimizing
 // memory allocations.
@@ -108,4 +111,9 @@ func (b *ByteBuffer) String() string {
 // Reset makes ByteBuffer.B empty.
 func (b *ByteBuffer) Reset() {
 	b.B = b.B[:0]
+}
+
+type ByteBufferWithTimestamp struct {
+	*ByteBuffer
+	Created time.Time
 }
